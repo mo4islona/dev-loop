@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Two real review rounds on a seeded change, to watch the reviewer work without a full loop.
+
+Round 1 reviews change/avg.js: a wrong divisor and a strategy class hierarchy nobody needs.
+Round 2 reviews fix/avg.js, which fixes the divisor but counts zeros, with the hierarchy
+finding marked as rejected by the human.
+
+Needs the Codex CLI. Takes a minute or two. Routes are the ones the starting profile gives.
+"""
+import json
+import re
+import shutil
+import subprocess
+import tempfile
+import textwrap
+from pathlib import Path
+
+DEMO = Path(__file__).resolve().parent
+SKILL = DEMO.parent
+
+
+def git(repo, *args):
+    identity = ["-c", "user.name=demo", "-c", "user.email=demo@example.com"]
+    return subprocess.run(["git", *identity, *args], cwd=repo, check=True, text=True, capture_output=True).stdout
+
+
+def snapshot(repo, run, k):
+    tree = subprocess.run([SKILL / "bin/snapshot"], cwd=repo, check=True, text=True, capture_output=True).stdout
+    (run / f"T{k}").write_text(tree)
+
+
+def reviewer_prompt(k, applied="", rejected=""):
+    template = (SKILL / "prompts/reviewer.md").read_text()
+    block = re.search(r"\{\{ROUND_CONTEXT\}\}\n<!--(.*?)-->", template, flags=re.S)
+    round_one, later = block.group(1).split("Round 2 and later:\n", 1)
+
+    if k == 1:
+        context = round_one.replace("Round 1:\n", "")
+    else:
+        context = later.replace("{{APPLIED}}", applied).replace("{{REJECTED}}", rejected)
+
+    prompt = template[: block.start()] + context.strip() + template[block.end() :]
+    return (
+        prompt.replace("{{ROUND}}", str(k))
+        .replace("{{BRIEF}}", (DEMO / "brief.md").read_text())
+        .replace("{{DO_NOT_FLAG}}", "- (none)")
+        .replace("{{LOOK_FOR}}", "- (none)")
+    )
+
+
+def fix_risk(f):
+    if f["touches"]:
+        return "high"
+
+    big = f["adds_lines"] + f["removes_lines"] > 30
+    if f["changes_behavior"] or f["files_touched"] > 1 or big:
+        return "medium"
+
+    return "low"
+
+
+def show(run, k):
+    review = json.loads((run / f"review-{k}.json").read_text())
+    print(f"\nRound {k}: verdict {review['verdict']}")
+
+    if review["simplest_alternative"]:
+        print(textwrap.fill(review["simplest_alternative"], 92, initial_indent="  simplest alternative: ", subsequent_indent="    "))
+
+    for f in review["findings"]:
+        risk = fix_risk(f)
+        auto = risk == "low" and f["confidence"] == "high"
+        route = "auto" if auto else "ask"
+        origin = f["origin"] + (f" of {f['prior_id']}" if f["prior_id"] else "")
+
+        print(f"\n  {f['id']}  {route}  {f['category']}  {f['severity']}  risk {risk}  {f['file']}:{f['line']}  ({origin})")
+        print(textwrap.fill(f["title"], 92, initial_indent="    ", subsequent_indent="    "))
+        print(textwrap.fill(f["failure_scenario"], 92, initial_indent="    failure: ", subsequent_indent="             "))
+        print(textwrap.fill(f["fix"], 92, initial_indent="    fix:     ", subsequent_indent="             "))
+
+    return review
+
+
+def review_round(repo, run, k, **context):
+    snapshot(repo, run, k)
+    (run / f"review-{k}.md").write_text(reviewer_prompt(k, **context))
+    print(f"\n... round {k}: Codex is reading the change")
+    subprocess.run([SKILL / "bin/review", run, str(k)], cwd=repo, check=True)
+    return show(run, k)
+
+
+def main():
+    work = Path(tempfile.mkdtemp(prefix="dev-loop-demo-"))
+    repo, run = work / "repo", work / "run"
+    repo.mkdir()
+    run.mkdir()
+    shutil.copy(SKILL / "settings.json", run / "settings.json")
+
+    shutil.copy(DEMO / "base/sum.js", repo / "sum.js")
+    git(repo, "init", "-q", "-b", "main")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    snapshot(repo, run, 0)
+
+    shutil.copy(DEMO / "change/avg.js", repo / "avg.js")
+    first = review_round(repo, run, 1)
+
+    bug = next((f for f in first["findings"] if f["category"] == "bug"), None)
+    if bug is None:
+        print("\nThe reviewer reported no bug this time, so the demo stops after round 1.")
+        return
+
+    rejected = [f for f in first["findings"] if f is not bug]
+    print(f"\nThe human accepts {bug['id']} and rejects the rest as `later`. The writer applies a fix.")
+
+    shutil.copy(DEMO / "fix/avg.js", repo / "avg.js")
+    review_round(
+        repo,
+        run,
+        2,
+        applied=f"- {bug['id']} {bug['file']}:{bug['line']}: {bug['fix']}",
+        rejected="\n".join(f"- {f['id']} {f['file']}:{f['line']}: {f['title']}. Rejected: later." for f in rejected) or "- (none)",
+    )
+
+    print(f"\nPrompts, diffs and raw reviews: {run}")
+
+
+if __name__ == "__main__":
+    main()

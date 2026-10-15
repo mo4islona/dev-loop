@@ -36,6 +36,69 @@ To swap models for one run:
 
     /dev-loop writer=sonnet/medium reviewer=gpt-6-astra/xhigh add a timeout to the RPC client
 
+## See the reviewer work
+
+    demo/run
+
+This builds a throwaway repo, drops in a small change with a wrong divisor and a class
+hierarchy nobody needs, and runs two real review rounds against Codex. The second round
+reviews a fix that brings in a new bug. It needs only the Codex CLI and takes a minute or
+two. It doesn't run the writer: the change and the fix are files in `demo/`, so every run
+has the same problems to find. (The reviewer's wording changes from run to run. It's a
+model.)
+
+Here's one run, unedited except for the temp path:
+
+```
+... round 1: Codex is reading the change
+
+Round 1: verdict rethink
+  simplest alternative: Export one averagePositive(xs) function that filters positive
+    values, uses the existing sumPositive helper, and divides by the positive count,
+    returning 0 when that count is zero. Remove both strategy classes and the optional
+    strategy parameter; leave sum.js unchanged.
+
+  R1-1  ask  bug  blocker  risk medium  avg.js:12  (new)
+    Both acceptance cases fail
+    failure: Verified with Node: [1, -1, 3] returns 1.3333333333333333 instead of 2 because
+             the denominator includes negative values. [] returns NaN instead of 0 because
+             it divides zero by zero.
+    fix:     Filter xs to positive values, then return sumPositive(positives) /
+             positives.length when nonempty, otherwise 0.
+
+  R1-2  ask  complexity  major  risk high  avg.js:3  (new)
+    Strategy hierarchy adds unnecessary extension machinery
+    failure: A reader must follow a base class, subclass, default instance allocation, and
+             forwarding function for one fixed calculation. The repository contains no
+             alternative strategy or caller requiring injection.
+    fix:     Delete both classes and the strategy parameter. Put the corrected calculation
+             directly in averagePositive(xs). Remove the unrelated null/undefined fallback;
+             the requested array behavior needs none of this machinery.
+
+The human accepts R1-1 and rejects the rest as `later`. The writer applies a fix.
+
+... round 2: Codex is reading the change
+
+Round 2: verdict fix
+
+  R2-1  ask  bug  major  risk medium  avg.js:12  (incomplete_fix of R1-1)
+    Exclude zero from the positive-value count
+    failure: averagePositive([0, 2]) returns 1 instead of 2. The denominator includes zero,
+             while sumPositive only sums values strictly greater than zero.
+    fix:     Change the count predicate from x >= 0 to x > 0 so the numerator and
+             denominator use the same positive values.
+
+Prompts, diffs and raw reviews: /tmp/dev-loop-demo-…/run
+```
+
+Round 1 found both problems. It ran the code to prove the bug, and its `rethink` verdict
+would put the hierarchy question to you before any small fix ran. Round 2 didn't stop at
+checking the fix it asked for: it found that the fix counts zeros, tied that back to R1-1,
+and left the rejected hierarchy finding alone.
+
+Every item here is `ask`, because each fix changes behaviour or the function's signature.
+With the starting profile, only low-risk fixes run without you.
+
 ## The loop
 
 ```mermaid
@@ -249,6 +312,7 @@ gets "learned" away.
 | `bin/snapshot` | a hash of the working tree | none |
 | `bin/review` | runs one Codex review round | none |
 | `bin/stats` | ledger numbers and rule candidates | none |
+| `demo/` | two review rounds on a seeded change | you |
 
 ## What it won't do
 
@@ -261,11 +325,9 @@ gets "learned" away.
 
 ## Status
 
-This is early. The snapshot, the review rounds and the stats have been tested; two review
-rounds ran against a real Codex model. In round 1 the reviewer caught a wrong divisor and a
-needless strategy class hierarchy, and said `rethink`. In round 2 it caught the bug that the
-first fix brought in, and it didn't repeat the finding that had been rejected. A full loop
-with a real writer hasn't run yet, so expect `SKILL.md` to change after the first real tasks.
+This is early. The snapshot, the review rounds and the stats have been tested, and
+`demo/run` repeats the review test for anyone. A full loop with a real writer hasn't run
+yet, so expect `SKILL.md` to change after the first real tasks.
 
 The goal isn't a loop that never asks you anything. It's one that asks only the questions
 your past answers can't settle.
