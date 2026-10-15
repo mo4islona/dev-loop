@@ -82,6 +82,16 @@ The orchestrator decides from these whether a fix runs without the human, so est
 honestly: the lines the fix removes and adds, the files it touches, whether callers see a
 behaviour change, and which sensitive areas it touches.
 
+## For the human who decides
+The human reads each finding without the code open and decides from it alone. So:
+- `title` names the visible effect, not the mechanism: "The chart's top edge sags on the
+  first frame", not "meanShare uses the wrong anchors".
+- `failure_scenario` starts with what the code is for, in one clause, then gives the
+  inputs and the wrong result.
+- `impact` says what happens if nobody fixes it: who or what sees it, how often, how bad.
+- `fix_sketch` shows the fix as a minimal unified diff, at most 20 lines. Leave it empty
+  when the fix is longer, and say so in `fix`.
+
 ## Severity and confidence
 - `blocker`: a wrong result, crash or data loss on a path that will run.
 - `major`: wrong in an edge case that will happen, or complexity a reader will trip on.

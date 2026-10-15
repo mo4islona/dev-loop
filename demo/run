@@ -84,7 +84,10 @@ def show(run, k):
         print(f"\n{f['id']:5} {f['title']}")
         print("      " + " · ".join(meta))
         print(paragraph(f["failure_scenario"]))
+        print(paragraph(f["impact"], "If skipped: "))
         print(paragraph(f["fix"], "Fix: "))
+        if f["fix_sketch"]:
+            print(textwrap.indent(f["fix_sketch"].rstrip(), "        "))
 
     return review
 

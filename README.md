@@ -52,58 +52,93 @@ Here's one run, unedited except for the temp path. The indented lines under each
 
 ```
 round 1: gpt-6-astra/high reads the change
-  codex  I’ll check `sumPositive` and the existing tests, then verify the new function’s results and design.
-  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
-  $ cat avg.js sum.js
-  $ node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,-3],[0,2,4],[1,3]]) cons…
-  $ git status --short; git ls-files; git log -1 --oneline
-  think  Summarizing bug fixes and tests · Detailing code removals and additions
-done in 32 s: verdict rethink, 2 findings
+  codex  I’ll read the implementation and test setup, then check the results for mixed, empty, and non-
+         positive inputs.
+  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'; git status --short
+  $ cat avg.js sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,0],[1…
+  think  Summarizing bug analysis · Detailing bug fix and complexity changes
+done in 47 s: verdict rethink, 2 findings
 
 Round 1: verdict rethink, 2 findings
-      Simpler shape: Implement averagePositive as one function: filter positive values,
-      return 0 when none remain, otherwise divide sumPositive(positives) by
-      positives.length. Keep sum.js unchanged and add assertions for both acceptance
-      examples.
+      Simpler shape: Use one averagePositive(xs) function: filter positive values, return 0
+      when none remain, otherwise divide sumPositive(positives) by positives.length. Keep
+      sum.js unchanged and add acceptance tests. No strategy classes or configurable
+      implementation are needed.
 
-R1-1  The denominator breaks both acceptance cases
+R1-1  Both required examples return incorrect results
       bug, blocker · avg.js:12 · you decide: the fix changes behaviour
-      Verified with Node: averagePositive([1, -1, 3]) returns 1.3333333333333333 instead of
-      2 because xs.length includes negative values. averagePositive([]) returns NaN instead
-      of 0 because it divides 0 by 0.
-      Fix: Filter positive values, return 0 if their count is zero, and otherwise divide
-      their sum by their count. Add regression assertions for both acceptance examples and
-      an array containing zero.
+      To calculate the mean of positive numbers, averagePositive([1, -1, 3]) returns
+      1.3333333333333333 instead of 2, and averagePositive([]) returns NaN instead of 0.
+      Both results were reproduced by running the actual exported function.
+      If skipped: Callers receive incorrect averages for mixed positive and non-positive
+      arrays and NaN for empty arrays. Both acceptance criteria fail, and no tests cover
+      them.
+      Fix: Divide by the number of positive values, returning 0 when that count is zero. Add
+      regression tests for both acceptance examples and an array without positive values.
+        --- a/avg.js
+        +++ b/avg.js
+        @@ -12 +12,3 @@
+        -    return sumPositive(xs) / xs.length;
+        +    const positives = xs.filter(x => x > 0);
+        +    if (positives.length === 0) return 0;
+        +    return sumPositive(positives) / positives.length;
+        --- /dev/null
+        +++ b/avg.test.js
+        @@ -0,0 +1,8 @@
+        +const assert = require('node:assert/strict');
+        +const test = require('node:test');
+        +const { averagePositive } = require('./avg');
+        +test('averages positive values and handles no positives', () => {
+        +  assert.equal(averagePositive([1, -1, 3]), 2);
+        +  assert.equal(averagePositive([]), 0);
+        +  assert.equal(averagePositive([-1, 0]), 0);
+        +});
 
-R1-2  A strategy hierarchy obscures a single calculation
+R1-2  A simple average requires tracing two classes and a configurable wrapper
       complexity, major · avg.js:3 · you decide: the fix touches public_api
-      Every ordinary call constructs PositiveAverageStrategy and forwards through compute.
-      Readers must track a base class, an unimplemented method, inheritance, an injectable
-      strategy parameter, and an unrelated null-input policy to understand one mean
-      calculation.
-      Fix: Delete both classes and the strategy parameter. Put the corrected calculation
-      from R1-1 directly in averagePositive(xs), without the unrequested null/undefined
-      branch. This preserves all required array behavior.
+      To understand the positive-number average, a reader must follow an abstract class, its
+      only implementation, default object construction, and a forwarding function. The
+      repository has no callers needing another strategy.
+      If skipped: Every reader and future change must account for an unnecessary extension
+      point and an unused throwing implementation.
+      Fix: Delete both classes and the strategy parameter. Move the compute body directly
+      into averagePositive(xs), applying R1-1's arithmetic correction there. This preserves
+      the required behavior. The full deletion diff exceeds 20 lines.
 
 The human accepts R1-1 and rejects the rest as `later`. The writer applies a fix.
 
 round 2: gpt-6-astra/high reads the change
-  codex  I’ll check the applied fix, then trace the surrounding code and tests for regressions and missed
-         bugs.
-  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
-  $ git status --short; nl -ba avg.js; nl -ba sum.js; git ls-files; node -e "const {averagePositive}=require('./a…
-  think  Finalizing test findings
-done in 22 s: verdict fix, 1 finding
+  codex  I’ll check the fix, trace how `sumPositive` handles inputs, and look for regression tests.
+  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json'; git status --short
+  $ nl -ba avg.js; nl -ba sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[…
+  think  Summarizing test fix changes
+done in 28 s: verdict fix, 1 finding
 
 Round 2: verdict fix, 1 finding
 
-R2-1  Zero still counts toward the positive average
+R2-1  Zeros incorrectly lower the average of positive values
       bug, major · avg.js:12 · incomplete fix of R1-1 · you decide: the fix changes behaviour
-      averagePositive([0, 2]) returns 1 instead of 2: the denominator includes zero, while
-      sumPositive only includes values greater than zero. Both acceptance examples pass, but
-      the promised regression assertions are absent.
-      Fix: Change x >= 0 to x > 0. Add regression assertions for both acceptance examples
-      and [0, 2], leaving sum.js unchanged.
+      To average positive numbers, averagePositive([0, 2]) should return 2, but returns 1.
+      The denominator includes zero while sumPositive excludes it. Both acceptance examples
+      pass, but the promised regression tests are also absent.
+      If skipped: Arrays containing both zeros and positive numbers consistently produce an
+      average below the correct result.
+      Fix: Count only values greater than zero. Add regression tests for the acceptance
+      examples, no positive values, and mixed zeros and positives.
+        --- a/avg.js
+        +++ b/avg.js
+        @@ -12,1 +12,1 @@
+        -    const count = xs.filter((x) => x >= 0).length;
+        +    const count = xs.filter((x) => x > 0).length;
+        --- /dev/null
+        +++ b/avg.test.js
+        @@ -0,0 +1,6 @@
+        +const assert = require('node:assert/strict');
+        +const { averagePositive } = require('./avg');
+        +assert.equal(averagePositive([1, -1, 3]), 2);
+        +assert.equal(averagePositive([]), 0);
+        +assert.equal(averagePositive([-2, 0]), 0);
+        +assert.equal(averagePositive([0, 2]), 2);
 ```
 
 Round 1 found both problems. It ran the code to prove the bug, and its `rethink` verdict
@@ -177,13 +212,12 @@ it work: what the reviewer says and every command it runs come into the chat as 
 happen.
 
     round 1: gpt-6-astra/high reads the change
-      codex  I’ll check `sumPositive` and the existing tests, then verify the new function’s results and design.
-      $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
-      $ cat avg.js sum.js
-      $ node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,-3],[0,2,4],[1,3]]) cons…
-      $ git status --short; git ls-files; git log -1 --oneline
-      think  Summarizing bug fixes and tests · Detailing code removals and additions
-    done in 32 s: verdict rethink, 2 findings
+      codex  I’ll read the implementation and test setup, then check the results for mixed, empty, and non-
+             positive inputs.
+      $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'; git status --short
+      $ cat avg.js sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,0],[1…
+      think  Summarizing bug analysis · Detailing bug fix and complexity changes
+    done in 47 s: verdict rethink, 2 findings
 
 **4. Triage.** The orchestrator reads the cited code and agrees or disagrees with each
 finding. It drops nits and anything you've already rejected in this task. Then it routes the
@@ -194,31 +228,40 @@ you.") and the loop moves on. Otherwise you get a short block per item, problem 
 
 > **Round 2:** 2 for you, 1 auto-fix, 1 dropped
 >
-> **H1. Backoff never resets** · bug · `src/retry.ts:88`
-> - Why: after one failure, every later retry waits 8 s, also after a success.
+> **H1. Retries wait 8 s even after a success** · bug · `src/retry.ts:88`
+> - Why: the upload client retries failed requests with backoff. After one failure, the
+>   delay never resets, so every later retry waits 8 s.
+> - If skipped: every upload after the first network error is 8 s slower, until restart.
 > - Fix: reset `delay` after a success. +1 −0, changes behaviour
 > - Me: agree. I ran the retry test and saw the 8 s wait.
 >
 > **H2. A cache for a value read once** · complexity · `src/cache.ts`
 > - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
+> - If skipped: 60 lines that the next reader must understand, for no gain.
 > - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60, a large change
 >
 > **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
 > Auto-fixes run without a question; you can veto them at the end.
 
-The headline is the problem in plain words, and `Why` is the input that breaks. The `Fix`
-line ends with the fact that made the orchestrator ask you instead of fixing it alone. The
-orchestrator adds a line of its own only when it has something to say: it disagrees, it
-checked the numbers, or the fix has a cost.
+Each item is written for someone who hasn't read the code. The headline is the effect you'd
+notice, `Why` says what the code is for and which input breaks it, and `If skipped` says
+what it costs to leave it. The `Fix` line ends with the fact that made the orchestrator ask
+you instead of fixing it alone. The orchestrator adds a line of its own only when it has
+something to say: it disagrees, it checked the numbers, or the fix has a cost.
 
 Then you answer in Claude Code's picker, one tab per item. Each tab has four choices:
-`Apply`, `Skip: later` (real, but out of scope), `Skip: over` (the fix adds complexity) and
-`Skip: wrong` (not a real problem). The orchestrator's own pick comes first, marked
-Recommended, so when you agree you press Enter. You can also type: an instruction changes
-the fix, a sentence says why not, and `stop` ends the loop.
+`Apply`, `Skip: later` (real, but out of scope), `Skip: not worth it` (the fix costs more
+than the problem) and `Skip: wrong` (not a real problem). The orchestrator's own pick comes
+first, marked Recommended, so when you agree you press Enter.
+
+A panel next to the choices shows the code at the cited line and the reviewer's fix as a
+small diff, so you can judge the fix without opening the file. When that still isn't
+enough, type `?`: the orchestrator explains the item in full (what the code does, how the
+failure happens, what the fix changes, what a skip costs) and asks again. You can also
+type an instruction that changes the fix, a sentence that says why not, or `stop`.
 
 The skip reason is the most useful thing you give the loop. A `wrong` teaches the reviewer
-what not to flag; an `over` teaches it which fixes cost more than they save.
+what not to flag; a `not worth it` teaches it which fixes cost more than they save.
 
 **6. Fix.** The writer applies the auto items and the ones you accepted. It may refuse one
 that it thinks is wrong. A refusal never turns into an auto-fix: it comes back to you with

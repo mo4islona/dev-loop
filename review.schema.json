@@ -18,7 +18,7 @@
         "additionalProperties": false,
         "required": [
           "id", "category", "severity", "confidence", "origin", "prior_id",
-          "file", "line", "title", "failure_scenario", "fix",
+          "file", "line", "title", "failure_scenario", "impact", "fix", "fix_sketch",
           "removes_lines", "adds_lines", "files_touched", "changes_behavior", "touches"
         ],
         "properties": {
@@ -30,9 +30,11 @@
           "prior_id": { "type": "string", "description": "The fix this finding follows up; empty otherwise." },
           "file": { "type": "string" },
           "line": { "type": "integer" },
-          "title": { "type": "string", "description": "One line." },
+          "title": { "type": "string", "description": "One line: the visible effect, not the mechanism." },
           "failure_scenario": { "type": "string", "description": "Inputs and state that give the wrong result; for complexity, what a reader must hold that they need not." },
+          "impact": { "type": "string", "description": "If nobody fixes it: who or what sees the failure, how often, how bad. For complexity, what it costs the next reader or change." },
           "fix": { "type": "string", "description": "The concrete change; for complexity, the simpler version." },
+          "fix_sketch": { "type": "string", "description": "A minimal unified diff of the fix, at most 20 lines; empty when the fix is longer." },
           "removes_lines": { "type": "integer" },
           "adds_lines": { "type": "integer" },
           "files_touched": { "type": "integer" },

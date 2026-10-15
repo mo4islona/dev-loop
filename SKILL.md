@@ -101,21 +101,27 @@ Fix. Otherwise show the round, then ask.
    ```markdown
    **Round 2:** 2 for you, 1 auto-fix, 1 dropped
 
-   **H1. Backoff never resets** · bug · `src/retry.ts:88`
-   - Why: after one failure, every later retry waits 8 s, also after a success.
+   **H1. Retries wait 8 s even after a success** · bug · `src/retry.ts:88`
+   - Why: the upload client retries failed requests with backoff. After one failure, the
+     delay never resets, so every later retry waits 8 s.
+   - If skipped: every upload after the first network error is 8 s slower, until restart.
    - Fix: reset `delay` after a success. +1 −0, changes behaviour
    - Me: agree. I ran the retry test and saw the 8 s wait.
 
    **H2. A cache for a value read once** · complexity · `src/cache.ts`
    - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
+   - If skipped: 60 lines that the next reader must understand, for no gain.
    - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60, a large change
 
    **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
    Auto-fixes run without a question; you can veto them at the end.
    ```
 
-   - The headline says the problem in plain words, in eight words or fewer.
-   - `Why:` gives the failure: these inputs give this wrong result.
+   - Write for a reader who has not seen this code. The headline says the visible effect
+     in plain words, in eight words or fewer.
+   - `Why:` says what the code is for, then the failure: these inputs give this wrong
+     result. Use two sentences when one is not clear.
+   - `If skipped:` is the reviewer's `impact`: who sees it, how often, how bad.
    - `Fix:` is the fix the writer gets if the human accepts. End it with the size and the
      fact that made the item an `ask`: changes behaviour, touches 3 files, touches the
      public API, low confidence. When you disagree with the reviewer's fix, put your fix
@@ -128,10 +134,16 @@ Fix. Otherwise show the round, then ask.
    the rest.
    - `header`: the item id. `question`: the headline and the failure in one sentence.
    - Options: `Apply` (description: the fix and its size), `Skip: later` (real, but out
-     of scope), `Skip: over` (the fix adds complexity), `Skip: wrong` (not a real problem).
-     Put your pick first and add "(Recommended)" to its label.
-   - The human's own text is an edit to the fix, a reason to skip, or `stop`. Say so in
-     the line before the call.
+     of scope), `Skip: not worth it` (tag `over`: the fix costs more than the problem),
+     `Skip: wrong` (not a real problem). Put your pick first and add "(Recommended)" to
+     its label.
+   - Give every option the same `preview`, so the detail panel stays open: the code at
+     the cited line as it is now (about 12 lines, with line numbers, the line marked), then
+     the reviewer's `fix_sketch` as a diff.
+   - The human's own text is `?` (explain more), an edit to the fix, a reason to skip, or
+     `stop`. Say so in the line before the call. On `?`, explain the item in full: what
+     the code does, the path to the failure, what the fix changes, what a skip costs. Then
+     ask about that item again.
 
 3. For the verdict `rethink`, ask that question alone and first. Options: `Rework` to the
    simpler shape, `Keep this approach`, `Stop`. Put `simplest_alternative` in full in the
