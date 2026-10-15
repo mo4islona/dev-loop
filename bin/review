@@ -36,6 +36,7 @@ now=$(cat "$run/T$k")
 echo "round $k: $model/$effort reads the change"
 
 codex exec \
+  --ephemeral \
   --json \
   -m "$model" \
   -c "model_reasoning_effort=$effort" \

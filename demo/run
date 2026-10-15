@@ -100,6 +100,13 @@ def review_round(repo, run, k, **context):
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     work = Path(tempfile.mkdtemp(prefix="dev-loop-demo-"))
+    try:
+        demo(work)
+    finally:
+        shutil.rmtree(work)
+
+
+def demo(work):
     repo, run = work / "repo", work / "run"
     repo.mkdir()
     run.mkdir()
@@ -130,8 +137,6 @@ def main():
         applied=f"- {bug['id']} {bug['file']}:{bug['line']}: {bug['fix']}",
         rejected="\n".join(f"- {f['id']} {f['file']}:{f['line']}: {f['title']}. Rejected: later." for f in rejected) or "- (none)",
     )
-
-    print(f"\nPrompts, diffs and raw reviews: {run}")
 
 
 if __name__ == "__main__":

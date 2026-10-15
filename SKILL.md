@@ -34,7 +34,9 @@ Run every `bin/` script from the task repo's root.
 ## Procedure
 
 ### 0. Start
-1. Read `profile.md`.
+1. Read `profile.md`. Delete the run directories older than 14 days:
+   `find $STATE/runs -mindepth 1 -maxdepth 1 -mtime +14 -exec rm -rf {} +`. Git may prune
+   the unreferenced snapshot trees after two weeks, so older revert commands are unreliable.
 2. `mkdir -p $RUN && $SKILL/bin/snapshot > $RUN/T0`. T0 includes the human's uncommitted
    work, so every review sees only this task's change.
 3. Write `$RUN/settings.json`: `settings.json` with this run's overrides from the
@@ -101,12 +103,12 @@ Fix. Otherwise show the round, then ask.
 
    **H1. Backoff never resets** · bug · `src/retry.ts:88`
    - Why: after one failure, every later retry waits 8 s, also after a success.
-   - Fix: reset `delay` after a success. +1 −0
+   - Fix: reset `delay` after a success. +1 −0, changes behaviour
    - Me: agree. I ran the retry test and saw the 8 s wait.
 
    **H2. A cache for a value read once** · complexity · `src/cache.ts`
    - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
-   - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60
+   - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60, a large change
 
    **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
    Auto-fixes run without a question; you can veto them at the end.
@@ -114,8 +116,10 @@ Fix. Otherwise show the round, then ask.
 
    - The headline says the problem in plain words, in eight words or fewer.
    - `Why:` gives the failure: these inputs give this wrong result.
-   - `Fix:` is the fix the writer gets if the human accepts. When you disagree with the
-     reviewer's fix, put your fix here and the reviewer's fix with your reason in `Me:`.
+   - `Fix:` is the fix the writer gets if the human accepts. End it with the size and the
+     fact that made the item an `ask`: changes behaviour, touches 3 files, touches the
+     public API, low confidence. When you disagree with the reviewer's fix, put your fix
+     here and the reviewer's fix with your reason in `Me:`.
    - Write `Me:` only when it adds something: a disagreement, a check you made, a cost.
    - Leave out route, risk, confidence and origin; they go to the ledger. Name the origin
      only when a fix brought the problem in.

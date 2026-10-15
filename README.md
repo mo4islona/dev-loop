@@ -104,8 +104,6 @@ R2-1  Zero still counts toward the positive average
       the promised regression assertions are absent.
       Fix: Change x >= 0 to x > 0. Add regression assertions for both acceptance examples
       and [0, 2], leaving sum.js unchanged.
-
-Prompts, diffs and raw reviews: /tmp/dev-loop-demo-…/run
 ```
 
 Round 1 found both problems. It ran the code to prove the bug, and its `rethink` verdict
@@ -198,20 +196,20 @@ you.") and the loop moves on. Otherwise you get a short block per item, problem 
 >
 > **H1. Backoff never resets** · bug · `src/retry.ts:88`
 > - Why: after one failure, every later retry waits 8 s, also after a success.
-> - Fix: reset `delay` after a success. +1 −0
+> - Fix: reset `delay` after a success. +1 −0, changes behaviour
 > - Me: agree. I ran the retry test and saw the 8 s wait.
 >
 > **H2. A cache for a value read once** · complexity · `src/cache.ts`
 > - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
-> - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60
+> - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60, a large change
 >
 > **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
 > Auto-fixes run without a question; you can veto them at the end.
 
-The headline is the problem in plain words, and `Why` is the input that breaks. The
+The headline is the problem in plain words, and `Why` is the input that breaks. The `Fix`
+line ends with the fact that made the orchestrator ask you instead of fixing it alone. The
 orchestrator adds a line of its own only when it has something to say: it disagrees, it
-checked the numbers, or the fix has a cost. Risk, confidence and the rest stay in the
-ledger.
+checked the numbers, or the fix has a cost.
 
 Then you answer in Claude Code's picker, one tab per item. Each tab has four choices:
 `Apply`, `Skip: later` (real, but out of scope), `Skip: over` (the fix adds complexity) and
@@ -365,6 +363,9 @@ gets "learned" away.
 
 - It never commits, pushes or makes a worktree in your repo.
 - The reviewer runs in a read-only sandbox.
+- It cleans up after itself. Codex keeps no session files from the reviews, and a run's
+  directory (prompts, diffs, raw reviews) is deleted after 14 days, about when git's own
+  cleanup may drop the snapshot trees. The ledger stays: it's what the loop learns from.
 - It never touches your git index, HEAD or branch. Snapshots are tree objects built from a
   throwaway index, and any auto-fix can be undone with `git diff <before> <after> | git apply -R`.
 - Run state and the ledger live in `~/.claude/dev-loop/`, outside this repo, because they
