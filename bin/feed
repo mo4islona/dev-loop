@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Turn `codex exec --json` events on stdin into a short live feed on stdout.
+
+A few lines per reviewer message, one per command it runs, and a last line with the verdict.
+Command output stays in the raw events; the feed only shows that the reviewer is working
+and what it checks.
+"""
+import json
+import re
+import shlex
+import sys
+import textwrap
+import time
+
+WIDTH = 110
+MESSAGE_LINES = 6
+
+
+def one_line(text):
+    text = " ".join(text.split())
+    return text if len(text) <= WIDTH else text[: WIDTH - 1] + "…"
+
+
+def wrapped(text, label):
+    lines = textwrap.wrap(" ".join(text.split()), WIDTH - 9, max_lines=MESSAGE_LINES, placeholder=" …")
+    return "\n".join(f"  {label if i == 0 else '':5}  {line}" for i, line in enumerate(lines))
+
+
+def bare_command(command):
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return command
+
+    wrapped_in_shell = len(argv) == 3 and argv[0].endswith("sh") and argv[1] in ("-c", "-lc")
+    return argv[2] if wrapped_in_shell else command
+
+
+def thought(text):
+    headings = re.findall(r"\*\*(.+?)\*\*", text)
+    return " · ".join(headings) if headings else text
+
+
+def say(line):
+    print(line, flush=True)
+
+
+def verdict_line(text, seconds):
+    try:
+        review = json.loads(text)
+    except ValueError:
+        return None
+
+    count = len(review.get("findings", []))
+    noun = "finding" if count == 1 else "findings"
+    return f"done in {seconds} s: verdict {review.get('verdict')}, {count} {noun}"
+
+
+def main():
+    start = time.monotonic()
+    last_message = ""
+
+    while line := sys.stdin.readline():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+
+        kind = event.get("type")
+        item = event.get("item", {})
+        item_type = item.get("type")
+
+        if kind == "item.completed" and item_type == "agent_message":
+            last_message = item["text"]
+            if not last_message.lstrip().startswith("{"):
+                say(wrapped(last_message, "codex"))
+
+        elif kind == "item.completed" and item_type == "reasoning":
+            say(wrapped(thought(item.get("text", "")), "think"))
+
+        elif kind == "item.started" and item_type == "command_execution":
+            say(f"  $ {one_line(bare_command(item['command']))}")
+
+        elif kind == "item.completed" and item_type == "command_execution" and item.get("exit_code"):
+            say(f"    exit {item['exit_code']}")
+
+        elif kind in ("error", "turn.failed"):
+            error = event.get("error", {}).get("message") or event.get("message", "")
+            say(f"  error  {one_line(error)}")
+
+        elif kind == "turn.completed":
+            seconds = round(time.monotonic() - start)
+            say(verdict_line(last_message, seconds) or f"done in {seconds} s")
+
+
+if __name__ == "__main__":
+    main()

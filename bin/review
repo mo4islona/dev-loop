@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Usage: review <run-dir> <round>
 # One review round in a fresh Codex thread. Reads <run>/settings.json, <run>/review-<k>.md
-# and the T* snapshots; writes <run>/review-<k>.json, and <run>/review-<k>.log with Codex's
-# own output.
+# and the T* snapshots; writes <run>/review-<k>.json. Prints a live feed of what the reviewer
+# says and runs; the raw events go to <run>/review-<k>.jsonl and Codex's stderr to
+# <run>/review-<k>.log.
 set -euo pipefail
 
 run=$1
@@ -32,11 +33,17 @@ now=$(cat "$run/T$k")
   fi
 } > "$run/review-$k.prompt"
 
+echo "round $k: $model/$effort reads the change"
+
 codex exec \
+  --json \
   -m "$model" \
   -c "model_reasoning_effort=$effort" \
+  -c model_reasoning_summary=concise \
   -s read-only \
   -C "$(git rev-parse --show-toplevel)" \
   --output-schema "$skill/review.schema.json" \
   -o "$run/review-$k.json" \
-  - < "$run/review-$k.prompt" > "$run/review-$k.log" 2>&1
+  - < "$run/review-$k.prompt" 2> "$run/review-$k.log" \
+  | tee "$run/review-$k.jsonl" \
+  | "$skill/bin/feed"

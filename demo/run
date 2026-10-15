@@ -11,6 +11,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 from pathlib import Path
@@ -48,34 +49,42 @@ def reviewer_prompt(k, applied="", rejected=""):
     )
 
 
-def fix_risk(f):
+def route(f):
     if f["touches"]:
-        return "high"
+        return "you decide: the fix touches " + ", ".join(f["touches"])
+    if f["changes_behavior"]:
+        return "you decide: the fix changes behaviour"
 
-    big = f["adds_lines"] + f["removes_lines"] > 30
-    if f["changes_behavior"] or f["files_touched"] > 1 or big:
-        return "medium"
+    large = f["files_touched"] > 1 or f["adds_lines"] + f["removes_lines"] > 30
+    if large:
+        return "you decide: the fix is large"
+    if f["confidence"] != "high":
+        return "you decide: the reviewer is not sure"
 
-    return "low"
+    return "runs without you"
+
+
+def paragraph(text, label=""):
+    return textwrap.fill(" ".join(text.split()), 92, initial_indent="      " + label, subsequent_indent="      ")
 
 
 def show(run, k):
     review = json.loads((run / f"review-{k}.json").read_text())
-    print(f"\nRound {k}: verdict {review['verdict']}")
+    count = len(review["findings"])
+    print(f"\nRound {k}: verdict {review['verdict']}, {count} finding{'' if count == 1 else 's'}")
 
     if review["simplest_alternative"]:
-        print(textwrap.fill(review["simplest_alternative"], 92, initial_indent="  simplest alternative: ", subsequent_indent="    "))
+        print(paragraph(review["simplest_alternative"], "Simpler shape: "))
 
     for f in review["findings"]:
-        risk = fix_risk(f)
-        auto = risk == "low" and f["confidence"] == "high"
-        route = "auto" if auto else "ask"
-        origin = f["origin"] + (f" of {f['prior_id']}" if f["prior_id"] else "")
+        meta = [f"{f['category']}, {f['severity']}", f"{f['file']}:{f['line']}", route(f)]
+        if f["prior_id"]:
+            meta.insert(2, f"{f['origin'].replace('_', ' ')} of {f['prior_id']}")
 
-        print(f"\n  {f['id']}  {route}  {f['category']}  {f['severity']}  risk {risk}  {f['file']}:{f['line']}  ({origin})")
-        print(textwrap.fill(f["title"], 92, initial_indent="    ", subsequent_indent="    "))
-        print(textwrap.fill(f["failure_scenario"], 92, initial_indent="    failure: ", subsequent_indent="             "))
-        print(textwrap.fill(f["fix"], 92, initial_indent="    fix:     ", subsequent_indent="             "))
+        print(f"\n{f['id']:5} {f['title']}")
+        print("      " + " · ".join(meta))
+        print(paragraph(f["failure_scenario"]))
+        print(paragraph(f["fix"], "Fix: "))
 
     return review
 
@@ -83,12 +92,13 @@ def show(run, k):
 def review_round(repo, run, k, **context):
     snapshot(repo, run, k)
     (run / f"review-{k}.md").write_text(reviewer_prompt(k, **context))
-    print(f"\n... round {k}: Codex is reading the change")
+    print()
     subprocess.run([SKILL / "bin/review", run, str(k)], cwd=repo, check=True)
     return show(run, k)
 
 
 def main():
+    sys.stdout.reconfigure(line_buffering=True)
     work = Path(tempfile.mkdtemp(prefix="dev-loop-demo-"))
     repo, run = work / "repo", work / "run"
     repo.mkdir()

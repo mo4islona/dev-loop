@@ -62,8 +62,12 @@ writer; after two red tries, stop and show the human.
 1. `$SKILL/bin/snapshot > $RUN/T$k`.
 2. Fill `prompts/reviewer.md` into `$RUN/review-$k.md`. From round 2 on, the round context
    lists the fixes applied in round k-1 and every finding the human rejected in this task.
-3. `$SKILL/bin/review $RUN $k` with `run_in_background: true`; a review takes minutes. The
-   result is `$RUN/review-$k.json`; on failure read `$RUN/review-$k.log`.
+3. Run `$SKILL/bin/review $RUN $k` with the `Monitor` tool (`timeout_ms` 1800000), so the
+   human sees the reviewer work: each message it writes and each command it runs arrives in
+   the chat as it happens. A review takes minutes. Do not answer the feed events; wait for
+   the exit. The result is `$RUN/review-$k.json`; on failure read `$RUN/review-$k.log`. If
+   the monitor stops before the review ends, run the round again with Bash
+   `run_in_background`.
 
 Every round hunts for new bugs in the whole change, not only in the fixes. The reviewer
 reports each finding's `origin`: `new` (round 1), `missed` (earlier rounds did not see it),
@@ -87,24 +91,57 @@ For each finding:
    `simplest_alternative` in full, and hold the other findings until the human answers.
 
 ### 5. Gate
-With no `ask` items, write one line ("round 2: 3 auto-fixes, nothing for you") and go to
-Fix. Otherwise show one table and stop:
+With no `ask` items, write one line ("Round 2: 3 auto-fixes, nothing for you.") and go to
+Fix. Otherwise show the round, then ask.
 
-    Round 2: 2 auto (applied with your reply), 2 for you, 1 dropped
-    A1 auto complexity low  src/store.ts:40  one-use wrapper around fetchAll (-12 +3)
-    H1 ask  bug        med  src/retry.ts:88  backoff never resets; third retry waits 8 s
-            fix: reset `delay` after a success          | orch: agree | origin: missed
-    H2 ask  complexity med  src/cache.ts:1   LRU cache for a value read once per run
-            fix: delete cache.ts, call loadConfig() (-60 +2) | orch: agree
-    reply: ok | ok H1 | no H2 <why> | edit H2 <how> | veto A1 | stop
+1. Write the round as Markdown in this shape, not as a code block or a padded table:
 
-Reply grammar, parts joined with `;`:
-- `ok`: accept all. `ok H1 H3`: accept these, reject the others with no reason.
-- `no H2 <reason>`, `edit H2 <instruction>`, `veto A1`, `stop`.
+   ```markdown
+   **Round 2:** 2 for you, 1 auto-fix, 1 dropped
 
-The reason after `no` is optional, but it is the strongest learning signal. Offer the tags
-`over` (the fix adds complexity), `wrong` (not a real problem), `later` (real, but out of
-scope) and `taste`.
+   **H1. Backoff never resets** · bug · `src/retry.ts:88`
+   - Why: after one failure, every later retry waits 8 s, also after a success.
+   - Fix: reset `delay` after a success. +1 −0
+   - Me: agree. I ran the retry test and saw the 8 s wait.
+
+   **H2. A cache for a value read once** · complexity · `src/cache.ts`
+   - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
+   - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60
+
+   **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
+   Auto-fixes run without a question; you can veto them at the end.
+   ```
+
+   - The headline says the problem in plain words, in eight words or fewer.
+   - `Why:` gives the failure: these inputs give this wrong result.
+   - `Fix:` is the fix the writer gets if the human accepts. When you disagree with the
+     reviewer's fix, put your fix here and the reviewer's fix with your reason in `Me:`.
+   - Write `Me:` only when it adds something: a disagreement, a check you made, a cost.
+   - Leave out route, risk, confidence and origin; they go to the ledger. Name the origin
+     only when a fix brought the problem in.
+
+2. Ask with `AskUserQuestion`, one question per item, at most four per call; ask again for
+   the rest.
+   - `header`: the item id. `question`: the headline and the failure in one sentence.
+   - Options: `Apply` (description: the fix and its size), `Skip: later` (real, but out
+     of scope), `Skip: over` (the fix adds complexity), `Skip: wrong` (not a real problem).
+     Put your pick first and add "(Recommended)" to its label.
+   - The human's own text is an edit to the fix, a reason to skip, or `stop`. Say so in
+     the line before the call.
+
+3. For the verdict `rethink`, ask that question alone and first. Options: `Rework` to the
+   simpler shape, `Keep this approach`, `Stop`. Put `simplest_alternative` in full in the
+   `Rework` preview.
+
+Log `Apply` as `accepted` and `Skip: <tag>` as `rejected` with the tag. Log the human's own
+text as `edited` when it changes the fix, and as `rejected` with that text as the reason
+when it says why not. The reason is the strongest learning signal, so the skip options carry
+one.
+
+Without `AskUserQuestion`, for example in a headless run, end the Markdown with
+`**My pick:** <reply>` and take a reply in this grammar, parts joined with `;`: `ok` (take
+the pick), `ok H1 H3` (accept these, reject the others), `no H2 <reason>`,
+`edit H2 <instruction>`, `veto A1`, `stop`.
 
 ### 6. Fix
 Send `prompts/fix.md` to the same writer with the auto, accepted and edited items. A
@@ -133,9 +170,11 @@ Show:
 - the open items;
 - a commit message draft in the human's style.
 
-Do not commit. Ask once: "Veto an auto-fix? Did the reviewer miss anything?" Log a veto as
-`vetoed` (a new line, same id) and a miss as `human_found`. A veto sets its autonomy cell
-back to `ask` in `profile.md` at once; Retro may promote it again later.
+Do not commit. Ask once with `AskUserQuestion`: "Veto an auto-fix?" (multi-select: `Keep
+all` and the auto-fixes, at most four) and "Did the reviewer miss anything?" (`No`, or the
+human's own text). Log a veto as `vetoed` (a new line, same id) and a miss as
+`human_found`. A veto sets its autonomy cell back to `ask` in `profile.md` at once; Retro
+may promote it again later.
 
 ### 10. Retro
 Run `$SKILL/bin/stats`. When the ledger lines since the last retro reach `retro_every`,

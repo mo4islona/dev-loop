@@ -47,46 +47,63 @@ two. It doesn't run the writer: the change and the fix are files in `demo/`, so 
 has the same problems to find. (The reviewer's wording changes from run to run. It's a
 model.)
 
-Here's one run, unedited except for the temp path:
+Here's one run, unedited except for the temp path. The indented lines under each
+`round` header are the live feed: they print while the reviewer works.
 
 ```
-... round 1: Codex is reading the change
+round 1: gpt-6-astra/high reads the change
+  codex  I’ll check `sumPositive` and the existing tests, then verify the new function’s results and design.
+  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
+  $ cat avg.js sum.js
+  $ node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,-3],[0,2,4],[1,3]]) cons…
+  $ git status --short; git ls-files; git log -1 --oneline
+  think  Summarizing bug fixes and tests · Detailing code removals and additions
+done in 32 s: verdict rethink, 2 findings
 
-Round 1: verdict rethink
-  simplest alternative: Export one averagePositive(xs) function that filters positive
-    values, uses the existing sumPositive helper, and divides by the positive count,
-    returning 0 when that count is zero. Remove both strategy classes and the optional
-    strategy parameter; leave sum.js unchanged.
+Round 1: verdict rethink, 2 findings
+      Simpler shape: Implement averagePositive as one function: filter positive values,
+      return 0 when none remain, otherwise divide sumPositive(positives) by
+      positives.length. Keep sum.js unchanged and add assertions for both acceptance
+      examples.
 
-  R1-1  ask  bug  blocker  risk medium  avg.js:12  (new)
-    Both acceptance cases fail
-    failure: Verified with Node: [1, -1, 3] returns 1.3333333333333333 instead of 2 because
-             the denominator includes negative values. [] returns NaN instead of 0 because
-             it divides zero by zero.
-    fix:     Filter xs to positive values, then return sumPositive(positives) /
-             positives.length when nonempty, otherwise 0.
+R1-1  The denominator breaks both acceptance cases
+      bug, blocker · avg.js:12 · you decide: the fix changes behaviour
+      Verified with Node: averagePositive([1, -1, 3]) returns 1.3333333333333333 instead of
+      2 because xs.length includes negative values. averagePositive([]) returns NaN instead
+      of 0 because it divides 0 by 0.
+      Fix: Filter positive values, return 0 if their count is zero, and otherwise divide
+      their sum by their count. Add regression assertions for both acceptance examples and
+      an array containing zero.
 
-  R1-2  ask  complexity  major  risk high  avg.js:3  (new)
-    Strategy hierarchy adds unnecessary extension machinery
-    failure: A reader must follow a base class, subclass, default instance allocation, and
-             forwarding function for one fixed calculation. The repository contains no
-             alternative strategy or caller requiring injection.
-    fix:     Delete both classes and the strategy parameter. Put the corrected calculation
-             directly in averagePositive(xs). Remove the unrelated null/undefined fallback;
-             the requested array behavior needs none of this machinery.
+R1-2  A strategy hierarchy obscures a single calculation
+      complexity, major · avg.js:3 · you decide: the fix touches public_api
+      Every ordinary call constructs PositiveAverageStrategy and forwards through compute.
+      Readers must track a base class, an unimplemented method, inheritance, an injectable
+      strategy parameter, and an unrelated null-input policy to understand one mean
+      calculation.
+      Fix: Delete both classes and the strategy parameter. Put the corrected calculation
+      from R1-1 directly in averagePositive(xs), without the unrequested null/undefined
+      branch. This preserves all required array behavior.
 
 The human accepts R1-1 and rejects the rest as `later`. The writer applies a fix.
 
-... round 2: Codex is reading the change
+round 2: gpt-6-astra/high reads the change
+  codex  I’ll check the applied fix, then trace the surrounding code and tests for regressions and missed
+         bugs.
+  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
+  $ git status --short; nl -ba avg.js; nl -ba sum.js; git ls-files; node -e "const {averagePositive}=require('./a…
+  think  Finalizing test findings
+done in 22 s: verdict fix, 1 finding
 
-Round 2: verdict fix
+Round 2: verdict fix, 1 finding
 
-  R2-1  ask  bug  major  risk medium  avg.js:12  (incomplete_fix of R1-1)
-    Exclude zero from the positive-value count
-    failure: averagePositive([0, 2]) returns 1 instead of 2. The denominator includes zero,
-             while sumPositive only sums values strictly greater than zero.
-    fix:     Change the count predicate from x >= 0 to x > 0 so the numerator and
-             denominator use the same positive values.
+R2-1  Zero still counts toward the positive average
+      bug, major · avg.js:12 · incomplete fix of R1-1 · you decide: the fix changes behaviour
+      averagePositive([0, 2]) returns 1 instead of 2: the denominator includes zero, while
+      sumPositive only includes values greater than zero. Both acceptance examples pass, but
+      the promised regression assertions are absent.
+      Fix: Change x >= 0 to x > 0. Add regression assertions for both acceptance examples
+      and [0, 2], leaving sum.js unchanged.
 
 Prompts, diffs and raw reviews: /tmp/dev-loop-demo-…/run
 ```
@@ -96,7 +113,7 @@ would put the hierarchy question to you before any small fix ran. Round 2 didn't
 checking the fix it asked for: it found that the fix counts zeros, tied that back to R1-1,
 and left the rejected hierarchy finding alone.
 
-Every item here is `ask`, because each fix changes behaviour or the function's signature.
+Every item here goes to you, because each fix changes behaviour or the function's signature.
 With the starting profile, only low-risk fixes run without you.
 
 ## The loop
@@ -157,25 +174,53 @@ category, severity, confidence, the concrete failure, the fix, and some facts ab
 (lines it adds and removes, files it touches, whether callers see different behaviour,
 which sensitive areas it touches).
 
+A review takes a few minutes, and a silent wait that long looks like a hang. So you watch
+it work: what the reviewer says and every command it runs come into the chat as they
+happen.
+
+    round 1: gpt-6-astra/high reads the change
+      codex  I’ll check `sumPositive` and the existing tests, then verify the new function’s results and design.
+      $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
+      $ cat avg.js sum.js
+      $ node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,-3],[0,2,4],[1,3]]) cons…
+      $ git status --short; git ls-files; git log -1 --oneline
+      think  Summarizing bug fixes and tests · Detailing code removals and additions
+    done in 32 s: verdict rethink, 2 findings
+
 **4. Triage.** The orchestrator reads the cited code and agrees or disagrees with each
 finding. It drops nits and anything you've already rejected in this task. Then it routes the
 rest, as described below.
 
-**5. Gate.** If nothing needs you, you get one line ("round 2: 3 auto-fixes, nothing for
-you") and the loop moves on. Otherwise you get one table:
+**5. Gate.** If nothing needs you, you get one line ("Round 2: 3 auto-fixes, nothing for
+you.") and the loop moves on. Otherwise you get a short block per item, problem first:
 
-    Round 2: 2 auto (applied with your reply), 2 for you, 1 dropped
-    A1 auto complexity low  src/store.ts:40  one-use wrapper around fetchAll (-12 +3)
-    H1 ask  bug        med  src/retry.ts:88  backoff never resets; third retry waits 8 s
-            fix: reset `delay` after a success          | orch: agree | origin: missed
-    H2 ask  complexity med  src/cache.ts:1   LRU cache for a value read once per run
-            fix: delete cache.ts, call loadConfig() (-60 +2) | orch: agree
-    reply: ok | ok H1 | no H2 <why> | edit H2 <how> | veto A1 | stop
+> **Round 2:** 2 for you, 1 auto-fix, 1 dropped
+>
+> **H1. Backoff never resets** · bug · `src/retry.ts:88`
+> - Why: after one failure, every later retry waits 8 s, also after a success.
+> - Fix: reset `delay` after a success. +1 −0
+> - Me: agree. I ran the retry test and saw the 8 s wait.
+>
+> **H2. A cache for a value read once** · complexity · `src/cache.ts`
+> - Why: `loadConfig()` runs once per process, so the LRU cache never hits.
+> - Fix: delete `cache.ts` and call `loadConfig()`. +2 −60
+>
+> **Auto:** A1 inline the one-use wrapper around `fetchAll` (`src/store.ts:40`, +3 −12).
+> Auto-fixes run without a question; you can veto them at the end.
 
-You answer in a line, joining parts with `;`, for example `ok H1; no H2 later`. The reason
-after `no` is optional, but it's the most useful thing you can give the loop. Four short
-tags cover most cases: `over` (the fix adds complexity), `wrong` (not a real problem),
-`later` (real, but out of scope) and `taste`.
+The headline is the problem in plain words, and `Why` is the input that breaks. The
+orchestrator adds a line of its own only when it has something to say: it disagrees, it
+checked the numbers, or the fix has a cost. Risk, confidence and the rest stay in the
+ledger.
+
+Then you answer in Claude Code's picker, one tab per item. Each tab has four choices:
+`Apply`, `Skip: later` (real, but out of scope), `Skip: over` (the fix adds complexity) and
+`Skip: wrong` (not a real problem). The orchestrator's own pick comes first, marked
+Recommended, so when you agree you press Enter. You can also type: an instruction changes
+the fix, a sentence says why not, and `stop` ends the loop.
+
+The skip reason is the most useful thing you give the loop. A `wrong` teaches the reviewer
+what not to flag; an `over` teaches it which fixes cost more than they save.
 
 **6. Fix.** The writer applies the auto items and the ones you accepted. It may refuse one
 that it thinks is wrong. A refusal never turns into an auto-fix: it comes back to you with
@@ -184,8 +229,9 @@ both sides.
 **7. Next round,** until a stop rule fires.
 
 **8. Close.** You get what changed, one line per file; every auto-fix with the command that
-reverts it; the open items; and a commit message draft. Then one question: "Veto an
-auto-fix? Did the reviewer miss anything?" dev-loop never commits. You do.
+reverts it; the open items; and a commit message draft. Then the picker asks two things:
+which auto-fixes to veto, and whether the reviewer missed anything. dev-loop never commits.
+You do.
 
 ## What the reviewer looks for
 
@@ -310,7 +356,8 @@ gets "learned" away.
 | `prompts/writer.md`, `fix.md`, `reviewer.md` | what each model is told | you |
 | `review.schema.json` | the shape of the reviewer's answer | you |
 | `bin/snapshot` | a hash of the working tree | none |
-| `bin/review` | runs one Codex review round | none |
+| `bin/review` | runs one Codex review round and prints its live feed | none |
+| `bin/feed` | turns Codex's event stream into that feed | none |
 | `bin/stats` | ledger numbers and rule candidates | none |
 | `demo/` | two review rounds on a seeded change | you |
 
