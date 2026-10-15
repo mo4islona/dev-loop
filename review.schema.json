@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "simplest_alternative", "findings"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["ship", "fix", "rethink"]
+    },
+    "simplest_alternative": {
+      "type": "string",
+      "description": "How the whole task could be done with materially fewer moving parts; empty when the change is already near that."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "category", "severity", "confidence", "origin", "prior_id",
+          "file", "line", "title", "failure_scenario", "fix",
+          "removes_lines", "adds_lines", "files_touched", "changes_behavior", "touches"
+        ],
+        "properties": {
+          "id": { "type": "string", "description": "R<round>-<n>, e.g. R2-3" },
+          "category": { "type": "string", "enum": ["bug", "complexity", "test", "style"] },
+          "severity": { "type": "string", "enum": ["blocker", "major", "minor", "nit"] },
+          "confidence": { "type": "string", "enum": ["high", "medium", "low"] },
+          "origin": { "type": "string", "enum": ["new", "missed", "fix_regression", "incomplete_fix"] },
+          "prior_id": { "type": "string", "description": "The fix this finding follows up; empty otherwise." },
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "title": { "type": "string", "description": "One line." },
+          "failure_scenario": { "type": "string", "description": "Inputs and state that give the wrong result; for complexity, what a reader must hold that they need not." },
+          "fix": { "type": "string", "description": "The concrete change; for complexity, the simpler version." },
+          "removes_lines": { "type": "integer" },
+          "adds_lines": { "type": "integer" },
+          "files_touched": { "type": "integer" },
+          "changes_behavior": { "type": "boolean", "description": "Callers see different behaviour after the fix." },
+          "touches": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["security", "persistence", "public_api", "concurrency", "dependency", "config", "tests_removed"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

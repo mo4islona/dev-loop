@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Usage: review <run-dir> <round>
+# One review round in a fresh Codex thread. Reads <run>/settings.json, <run>/review-<k>.md
+# and the T* snapshots; writes <run>/review-<k>.json, and <run>/review-<k>.log with Codex's
+# own output.
+set -euo pipefail
+
+run=$1
+k=$2
+skill=$(cd "$(dirname "$0")/.." && pwd)
+
+read -r model effort < <(python3 -c '
+import json, sys
+reviewer = json.load(open(sys.argv[1]))["reviewer"]
+print(reviewer["model"], reviewer["effort"])
+' "$run/settings.json")
+
+base=$(cat "$run/T0")
+now=$(cat "$run/T$k")
+
+{
+  cat "$run/review-$k.md"
+  printf '\n<full_diff>\n'
+  git diff "$base" "$now"
+  printf '</full_diff>\n'
+
+  if [ "$k" -gt 1 ]; then
+    prev=$(cat "$run/T$((k - 1))")
+    printf '\n<delta_diff>\n'
+    git diff "$prev" "$now"
+    printf '</delta_diff>\n'
+  fi
+} > "$run/review-$k.prompt"
+
+codex exec \
+  -m "$model" \
+  -c "model_reasoning_effort=$effort" \
+  -s read-only \
+  -C "$(git rev-parse --show-toplevel)" \
+  --output-schema "$skill/review.schema.json" \
+  -o "$run/review-$k.json" \
+  - < "$run/review-$k.prompt" > "$run/review-$k.log" 2>&1

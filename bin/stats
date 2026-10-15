@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Ledger numbers for the dev-loop Retro.
+
+stats         trend per task, autonomy cells with hints, rule candidates
+stats kinds   the `kind` labels in use, so a new finding reuses one
+"""
+import json
+import re
+import sys
+from collections import Counter, defaultdict
+from pathlib import Path
+
+LEDGER = Path.home() / ".claude" / "dev-loop" / "ledger.jsonl"
+PROFILE = Path(__file__).resolve().parent.parent / "profile.md"
+
+HUMAN = {"accepted", "edited", "rejected", "vetoed", "pushed_back"}
+WINDOW = 10
+
+
+def load_ledger():
+    if not LEDGER.exists():
+        return []
+
+    with LEDGER.open() as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def retro_offset(profile):
+    match = re.search(r"ledger lines: (\d+)", profile)
+    return int(match.group(1)) if match else 0
+
+
+def autonomy_table(profile):
+    table = {}
+    for line in profile.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 3 and cells[1] in ("ask", "auto"):
+            table[cells[0]] = {"low": cells[1], "medium": cells[2]}
+
+    return table
+
+
+def reason_tag(row):
+    words = row.get("reason", "").split()
+    return words[0] if words else "-"
+
+
+def print_kinds(rows):
+    for kind, n in Counter(r["kind"] for r in rows).most_common():
+        print(f"{n:5}  {kind}")
+
+
+def print_tasks(rows):
+    by_task = defaultdict(list)
+    for r in rows:
+        by_task[r["task"]].append(r)
+
+    print(f"\nlast {WINDOW} tasks              rounds  asked  auto  vetoed  wrong")
+    for task, task_rows in list(by_task.items())[-WINDOW:]:
+        decisions = Counter(r["decision"] for r in task_rows)
+        rounds = max(r["round"] for r in task_rows)
+        asked = sum(decisions[d] for d in HUMAN)
+        wrong = sum(1 for r in task_rows if r["decision"] == "rejected" and reason_tag(r) == "wrong")
+        print(f"{task[:30]:30} {rounds:6} {asked:6} {decisions['applied']:5} {decisions['vetoed']:7} {wrong:6}")
+
+
+def print_cells(rows, table):
+    by_cell = defaultdict(list)
+    for r in rows:
+        if r["risk"] != "high" and r["decision"] in HUMAN | {"applied"}:
+            by_cell[(r["category"], r["risk"])].append(r)
+
+    print(f"\ncell               route  last {WINDOW}: accepted edited rejected vetoed  hint")
+    for (category, risk), cell_rows in sorted(by_cell.items()):
+        route = table.get(category, {}).get(risk, "?")
+        window = Counter(r["decision"] for r in cell_rows[-WINDOW:])
+        human = sum(window[d] for d in HUMAN)
+        bad = window["rejected"] + window["vetoed"]
+
+        hint = ""
+        if route == "ask" and human >= WINDOW and window["accepted"] >= 9 and window["vetoed"] == 0:
+            hint = "promote"
+        if route == "auto" and bad >= 2:
+            hint = "demote"
+
+        print(f"{category + '/' + risk:18} {route:5} {window['accepted']:17} {window['edited']:6} {window['rejected']:8} {window['vetoed']:6}  {hint}")
+
+
+def print_candidates(rows):
+    rejected = Counter((r["kind"], reason_tag(r)) for r in rows if r["decision"] == "rejected")
+    found = Counter(r["kind"] for r in rows if r["decision"] == "human_found")
+    vetoed = {(r["task"], r["round"], r["id"]) for r in rows if r["decision"] == "vetoed"}
+    fixed_in = defaultdict(set)
+    for r in rows:
+        kept = (r["task"], r["round"], r["id"]) not in vetoed
+        if kept and r["decision"] in ("accepted", "edited", "applied"):
+            fixed_in[r["kind"]].add(r["task"])
+
+    print("\ncandidates (skip those already in profile.md)")
+    for (kind, reason), n in rejected.items():
+        if n >= 3:
+            print(f"  do-not-flag  {kind}  [{reason} x{n}]")
+    for kind, n in found.items():
+        if n >= 2:
+            print(f"  look-for     {kind}  [x{n}]")
+    for kind, tasks in fixed_in.items():
+        if len(tasks) >= 2:
+            print(f"  writer-rule  {kind}  [{len(tasks)} tasks]")
+
+
+def main():
+    rows = load_ledger()
+    if sys.argv[1:] == ["kinds"]:
+        print_kinds(rows)
+        return
+
+    profile = PROFILE.read_text()
+    since = len(rows) - retro_offset(profile)
+    print(f"ledger: {len(rows)} lines, {since} since the last retro")
+
+    print_tasks(rows)
+    print_cells(rows, autonomy_table(profile))
+    print_candidates(rows)
+
+
+if __name__ == "__main__":
+    main()

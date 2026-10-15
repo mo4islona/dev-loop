@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Prints the tree hash of the working tree (tracked and untracked, minus ignored files).
+# A throwaway index keeps the human's index, HEAD and branch untouched.
+set -euo pipefail
+
+dir=$(mktemp -d)
+trap 'rm -rf "$dir"' EXIT
+
+index=$(git rev-parse --git-path index)
+if [ -f "$index" ]; then
+  cp "$index" "$dir/index"
+fi
+
+GIT_INDEX_FILE="$dir/index" git add -A
+GIT_INDEX_FILE="$dir/index" git write-tree
