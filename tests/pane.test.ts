@@ -14,7 +14,7 @@ const PANE = {
 } as const
 
 const FEED = [
-  'round 2: gpt-6-astra/high reads the change',
+  'round 2: gpt-6.1-sol/high reads the change',
   '  codex  I will check the fix, then hunt the whole change',
   '         for bugs nobody reported.',
   '  $ cat src/retry.ts',

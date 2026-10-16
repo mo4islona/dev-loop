@@ -1,4 +1,4 @@
 {
   "writer": { "model": "opus", "effort": "high" },
-  "reviewer": { "model": "gpt-6-astra", "effort": "high" }
+  "reviewer": { "model": "gpt-6.1-sol", "effort": "high" }
 }

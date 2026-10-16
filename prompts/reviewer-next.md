@@ -16,9 +16,10 @@ R{{ROUND}}-1, R{{ROUND}}-2 and so on.
 Do all three, in this order:
 1. Check each applied fix. Is it correct and complete? For an incomplete fix, report a
    finding with origin `incomplete_fix` and `prior_id` set to the fix's id.
-2. Hunt for bugs that the fixes brought in. Read the code around them as well. Origin
-   `fix_regression`.
-3. Hunt for new bugs across the whole change, as if no one had reviewed it. Earlier rounds
-   missed things, so do not stop at the fixes. Origin `missed`.
+2. Hunt for bugs and needless complexity that the fixes brought in: a fix often adds a
+   guard, a helper or a state where a smaller change does the job. Read the code around
+   the fixes as well. Origin `fix_regression`.
+3. Hunt for new bugs and needless complexity across the whole change, as if no one had
+   reviewed it. Earlier rounds missed things, so do not stop at the fixes. Origin `missed`.
 
 The rules from the first prompt still apply.

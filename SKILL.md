@@ -42,7 +42,7 @@ Run every `bin/` script from the task repo's root.
    work, so every review sees only this task's change.
 3. Write `$RUN/settings.json`: `settings.json` with this run's overrides from the
    arguments, `writer=<model>[/<effort>]` and `reviewer=<model>[/<effort>]`, for example
-   `/dev-loop reviewer=gpt-6-astra/xhigh fix the retry backoff`. `bin/review` reads it.
+   `/dev-loop reviewer=gpt-6.1-sol/xhigh fix the retry backoff`. `bin/review` reads it.
 
 ### 1. Brief
 Write `$RUN/brief.md`:
@@ -221,7 +221,7 @@ after the human says yes.
      "round":2,"id":"H1","category":"bug","severity":"major","confidence":"high",
      "origin":"missed","risk":"medium","route":"ask","orch":"agree","decision":"accepted",
      "reason":"","kind":"backoff not reset","file":"src/retry.ts",
-     "writer":"opus/high","reviewer":"gpt-6-astra/high"}
+     "writer":"opus/high","reviewer":"gpt-6.1-sol/high"}
 
 One JSON object per line. `decision` is one of `applied` (auto), `accepted`, `edited`,
 `rejected`, `vetoed`, `dropped`, `pushed_back`, `human_found`. `kind` is a 2-6 word label

@@ -38,7 +38,7 @@ Then, in any repo:
 
 To swap models for one run:
 
-    /dev-loop writer=sonnet/medium reviewer=gpt-6-astra/xhigh add a timeout to the RPC client
+    /dev-loop writer=sonnet/medium reviewer=gpt-6.1-sol/xhigh add a timeout to the RPC client
 
 ## See the reviewer work
 
@@ -51,98 +51,76 @@ two. It doesn't run the writer: the change and the fix are files in `demo/`, so 
 has the same problems to find. (The reviewer's wording changes from run to run. It's a
 model.)
 
-Here's one run, unedited except for the temp path. The indented lines under each
-`round` header are the live feed: they print while the reviewer works.
+Here's one run, unedited. The indented lines under each `round` header are the live feed:
+they print while the reviewer works.
 
 ```
-round 1: gpt-6-astra/high reads the change
-  codex  I’ll read the implementation and test setup, then check the results for mixed, empty, and non-
-         positive inputs.
-  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'; git status --short
-  $ cat avg.js sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,0],[1…
-  think  Summarizing bug analysis · Detailing bug fix and complexity changes
-done in 47 s: verdict rethink, 2 findings
+round 1: gpt-6.1-sol/high reads the change
+  codex  I’ll check the repository and CI status, then trace the calculation and look for unnecessary
+         complexity.
+  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
+  $ git status --short; git remote -v; git log -4 --oneline
+  $ nl -ba avg.js; nl -ba sum.js; ls -la
+  think  Clarifying bug scope and testing
+  $ node -e 'const { averagePositive } = require("./avg"); for (const xs of [[1,-1,3],[],[0,-2],[2,4]]) { const a…
+  think  Evaluating code refactoring constraints · Detailing simplification and fix approach
+done in 51 s: verdict rethink, 2 findings · tokens: 22k new, 61k cached, 1.5k out
 
 Round 1: verdict rethink, 2 findings
-      Simpler shape: Use one averagePositive(xs) function: filter positive values, return 0
-      when none remain, otherwise divide sumPositive(positives) by positives.length. Keep
-      sum.js unchanged and add acceptance tests. No strategy classes or configurable
-      implementation are needed.
+      Simpler shape: Export one averagePositive(xs) function: filter positive values, return
+      0 when none remain, otherwise divide sumPositive(positives) by positives.length. Reuse
+      sum.js unchanged and remove the strategy classes and optional strategy parameter.
 
-R1-1  Both required examples return incorrect results
+R1-1  Both acceptance examples return incorrect results
       bug, blocker · avg.js:12 · you decide: the fix changes behaviour
-      To calculate the mean of positive numbers, averagePositive([1, -1, 3]) returns
-      1.3333333333333333 instead of 2, and averagePositive([]) returns NaN instead of 0.
-      Both results were reproduced by running the actual exported function.
-      If skipped: Callers receive incorrect averages for mixed positive and non-positive
-      arrays and NaN for empty arrays. Both acceptance criteria fail, and no tests cover
-      them.
-      Fix: Divide by the number of positive values, returning 0 when that count is zero. Add
-      regression tests for both acceptance examples and an array without positive values.
-        --- a/avg.js
-        +++ b/avg.js
-        @@ -12 +12,3 @@
+      For calculating the mean of positive numbers, [1, -1, 3] returns 1.3333333333333333
+      instead of 2 because the divisor includes negative values; [] returns NaN instead of
+      0. Both results were confirmed with a targeted Node reproducer.
+      If skipped: Callers receive an incorrect mean whenever nonpositive values accompany
+      positive values, and NaN for empty input.
+      Fix: Divide by the number of positive values and return 0 when that count is zero.
+      Keep sum.js unchanged.
+        @@ -12,1 +12,2 @@
         -    return sumPositive(xs) / xs.length;
         +    const positives = xs.filter(x => x > 0);
-        +    if (positives.length === 0) return 0;
-        +    return sumPositive(positives) / positives.length;
-        --- /dev/null
-        +++ b/avg.test.js
-        @@ -0,0 +1,8 @@
-        +const assert = require('node:assert/strict');
-        +const test = require('node:test');
-        +const { averagePositive } = require('./avg');
-        +test('averages positive values and handles no positives', () => {
-        +  assert.equal(averagePositive([1, -1, 3]), 2);
-        +  assert.equal(averagePositive([]), 0);
-        +  assert.equal(averagePositive([-1, 0]), 0);
-        +});
+        +    return positives.length === 0 ? 0 : sumPositive(positives) / positives.length;
 
-R1-2  A simple average requires tracing two classes and a configurable wrapper
+R1-2  A simple average requires navigating an unnecessary strategy hierarchy
       complexity, major · avg.js:3 · you decide: the fix touches public_api
-      To understand the positive-number average, a reader must follow an abstract class, its
-      only implementation, default object construction, and a forwarding function. The
-      repository has no callers needing another strategy.
-      If skipped: Every reader and future change must account for an unnecessary extension
-      point and an unused throwing implementation.
-      Fix: Delete both classes and the strategy parameter. Move the compute body directly
-      into averagePositive(xs), applying R1-1's arithmetic correction there. This preserves
-      the required behavior. The full deletion diff exceeds 20 lines.
+      For implementing one positive-average calculation, readers must follow a throwing base
+      class, its only subclass, a default object allocation, and a forwarding function.
+      There are no callers or alternative implementations in the repository that require
+      strategy selection.
+      If skipped: Every reader and future change must account for replaceable computation
+      and inheritance that the task does not need.
+      Fix: Delete both strategy classes and the optional strategy parameter, and place the
+      corrected calculation from R1-1 directly inside averagePositive(xs). This preserves
+      the required behavior with one function. The complete removal diff exceeds 20 lines.
 
 The human accepts R1-1 and rejects the rest as `later`. The writer applies a fix.
 
-round 2: gpt-6-astra/high reads the change
-  codex  I’ll check the fix, trace how `sumPositive` handles inputs, and look for regression tests.
-  $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json'; git status --short
-  $ nl -ba avg.js; nl -ba sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[…
-  think  Summarizing test fix changes
-done in 28 s: verdict fix, 1 finding
+round 2: gpt-6.1-sol/high reads the change
+  codex  I’ll check the fix against mixed inputs and zero values, then review the current files for other
+         issues.
+  $ nl -ba avg.js; nl -ba sum.js; rg --files -g '!node_modules' -g '!target'
+  $ git remote -v; git status --short
+  $ node -e 'const { averagePositive } = require("./avg"); for (const [xs, expected] of [[[1,-1,3],2],[[],0],[[0,…
+done in 18 s: verdict fix, 1 finding · tokens: 27k new, 131k cached, 2.1k out
 
 Round 2: verdict fix, 1 finding
 
-R2-1  Zeros incorrectly lower the average of positive values
+R2-1  Zeros still lower the average of positive numbers
       bug, major · avg.js:12 · incomplete fix of R1-1 · you decide: the fix changes behaviour
-      To average positive numbers, averagePositive([0, 2]) should return 2, but returns 1.
-      The denominator includes zero while sumPositive excludes it. Both acceptance examples
-      pass, but the promised regression tests are also absent.
-      If skipped: Arrays containing both zeros and positive numbers consistently produce an
-      average below the correct result.
-      Fix: Count only values greater than zero. Add regression tests for the acceptance
-      examples, no positive values, and mixed zeros and positives.
-        --- a/avg.js
-        +++ b/avg.js
+      For calculating the mean of positive numbers, averagePositive([0, 2, 4]) returns 2
+      instead of 3. The divisor counts zero, while sumPositive correctly includes only
+      values greater than zero. A targeted Node reproducer confirmed this result; both
+      explicit acceptance examples now pass.
+      If skipped: Any input containing both zeros and positive numbers produces an average
+      below the required value.
+      Fix: Count only values strictly greater than zero, matching sumPositive.
         @@ -12,1 +12,1 @@
         -    const count = xs.filter((x) => x >= 0).length;
         +    const count = xs.filter((x) => x > 0).length;
-        --- /dev/null
-        +++ b/avg.test.js
-        @@ -0,0 +1,6 @@
-        +const assert = require('node:assert/strict');
-        +const { averagePositive } = require('./avg');
-        +assert.equal(averagePositive([1, -1, 3]), 2);
-        +assert.equal(averagePositive([]), 0);
-        +assert.equal(averagePositive([-2, 0]), 0);
-        +assert.equal(averagePositive([0, 2]), 2);
 ```
 
 Round 1 found both problems. It ran the code to prove the bug, and its `rethink` verdict
@@ -179,7 +157,7 @@ Four parties take part:
 |---|---|---|
 | Orchestrator | the Claude Code session where you typed `/dev-loop` | the task |
 | Writer | a Claude subagent, Opus at high effort by default | one per task |
-| Reviewer | Codex, `gpt-6-astra` at high reasoning by default, read-only | one thread for up to three rounds |
+| Reviewer | Codex, `gpt-6.1-sol` at high reasoning by default, read-only | one thread for up to three rounds |
 | You | the gate | only the findings routed to you |
 
 The orchestrator writes no code. It frames the task, runs the other two, scores findings,
@@ -191,9 +169,9 @@ knows why it wrote what it wrote and can argue back.
 The reviewer keeps a thread too, but a shorter one. Round 1 reads the code; the next two
 rounds get only the new diff, so the reviewer doesn't pay to read everything again. The
 risk is that a reviewer with a memory only checks its old findings. So each round's message
-gives it three jobs, and the last one is to hunt the whole change for bugs as if nobody had
-reviewed it. And in round 4 a new thread starts, reads the whole change cold, and runs for
-three rounds in its turn.
+gives it three jobs, and the last one is to hunt the whole change for bugs and needless
+complexity as if nobody had reviewed it. And in round 4 a new thread starts, reads the
+whole change cold, and runs for three rounds in its turn.
 
 The writer and the reviewer are different models on purpose. A model reviewing code from
 its own family tends to share that family's blind spots.
@@ -218,13 +196,16 @@ A review takes a few minutes, and a silent wait that long looks like a hang. So 
 it work in a pane above the prompt: what the reviewer says and every command it runs, as
 they happen. The chat stays quiet until the review ends.
 
-    round 1: gpt-6-astra/high reads the change
-      codex  I’ll read the implementation and test setup, then check the results for mixed, empty, and non-
-             positive inputs.
-      $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'; git status --short
-      $ cat avg.js sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,0],[1…
-      think  Summarizing bug analysis · Detailing bug fix and complexity changes
-    done in 47 s: verdict rethink, 2 findings
+    round 1: gpt-6.1-sol/high reads the change
+      codex  I’ll check the repository and CI status, then trace the calculation and look for unnecessary
+             complexity.
+      $ pwd; rg --files -g '!node_modules' -g '!target' -g '!package-lock.json' -g '!yarn.lock'
+      $ git status --short; git remote -v; git log -4 --oneline
+      $ nl -ba avg.js; nl -ba sum.js; ls -la
+      think  Clarifying bug scope and testing
+      $ node -e 'const { averagePositive } = require("./avg"); for (const xs of [[1,-1,3],[],[0,-2],[2,4]]) { const a…
+      think  Evaluating code refactoring constraints · Detailing simplification and fix approach
+    done in 51 s: verdict rethink, 2 findings · tokens: 22k new, 61k cached, 1.5k out
 
 The line under the prompt shows the round's clock and its latest action, and a click on it
 opens or closes the pane; Esc closes it too. The pane opens by itself only in a terminal 144
@@ -290,8 +271,9 @@ You do.
 Round 1 reviews the whole change. Every later round does three jobs, in this order:
 
 1. Check each fix from the last round. Is it right, and is it complete?
-2. Look for bugs the fixes brought in.
-3. Hunt the whole change for new bugs, as if nobody had reviewed it.
+2. Look for bugs and needless complexity the fixes brought in. A fix likes to add a guard,
+   a helper or a field where a one-line change would do.
+3. Hunt the whole change for new bugs and needless complexity, as if nobody had reviewed it.
 
 The third job is the one people skip. Reviews miss things, and a fix changes the code
 around it. So every round starts the hunt over. Each finding says where it came from: `new`,
