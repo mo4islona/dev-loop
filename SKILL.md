@@ -16,7 +16,7 @@ them, log every decision, and keep `profile.md` current.
 |---|---|---|
 | Orchestrator | this session | the task |
 | Writer | `Agent` with `model` and `effort` from settings `writer`, prompt from `prompts/writer.md` | one per task; fix rounds go to the same agent through `SendMessage`, so it keeps its reasons |
-| Reviewer | `bin/review` → Codex with settings `reviewer`, read-only sandbox | a fresh thread every round: a resumed thread checks its own old findings and stops hunting |
+| Reviewer | `bin/review` → Codex with settings `reviewer`, read-only sandbox | one Codex thread for up to three rounds: later rounds resume it with the new diff and a new bug hunt; `bin/review` starts a new thread in rounds 4, 7, ..., so old findings do not anchor it |
 | Human | the gate | decides every finding the profile routes to `ask` |
 
 ## Paths
@@ -34,9 +34,10 @@ Run every `bin/` script from the task repo's root.
 ## Procedure
 
 ### 0. Start
-1. Read `profile.md`. Delete the run directories older than 14 days:
-   `find $STATE/runs -mindepth 1 -maxdepth 1 -mtime +14 -exec rm -rf {} +`. Git may prune
-   the unreferenced snapshot trees after two weeks, so older revert commands are unreliable.
+1. Read `profile.md`. Delete the run directories and pane files older than 14 days:
+   `find $STATE/runs $STATE/live -mindepth 1 -maxdepth 1 -mtime +14 -exec rm -rf {} +`. Git
+   may prune the unreferenced snapshot trees after two weeks, so older revert commands are
+   unreliable.
 2. `mkdir -p $RUN && $SKILL/bin/snapshot > $RUN/T0`. T0 includes the human's uncommitted
    work, so every review sees only this task's change.
 3. Write `$RUN/settings.json`: `settings.json` with this run's overrides from the
@@ -62,14 +63,13 @@ writer; after two red tries, stop and show the human.
 
 ### 3. Review round k (k = 1, 2, ...)
 1. `$SKILL/bin/snapshot > $RUN/T$k`.
-2. Fill `prompts/reviewer.md` into `$RUN/review-$k.md`. From round 2 on, the round context
-   lists the fixes applied in round k-1 and every finding the human rejected in this task.
-3. Run `$SKILL/bin/review $RUN $k` with the `Monitor` tool (`timeout_ms` 1800000), so the
-   human sees the reviewer work: each message it writes and each command it runs arrives in
-   the chat as it happens. A review takes minutes. Do not answer the feed events; wait for
-   the exit. The result is `$RUN/review-$k.json`; on failure read `$RUN/review-$k.log`. If
-   the monitor stops before the review ends, run the round again with Bash
-   `run_in_background`.
+2. Fill `$RUN/review-$k.md`: from `prompts/reviewer.md` in round 1, and from
+   `prompts/reviewer-next.md` in later rounds, with the fixes applied in round k-1 and
+   every finding the human rejected in this task.
+3. Run `$SKILL/bin/review $RUN $k` with Bash `run_in_background: true`; a review takes
+   minutes. The dev-loop pane shows the human what the reviewer says and runs, so say
+   nothing until the notification that the review ended. The result is
+   `$RUN/review-$k.json`; on failure read `$RUN/review-$k.log`.
 
 Every round hunts for new bugs in the whole change, not only in the fixes. The reviewer
 reports each finding's `origin`: `new` (round 1), `missed` (earlier rounds did not see it),
@@ -185,6 +185,9 @@ Show:
   (`git diff <Ta> <Tb> | git apply -R`);
 - the open items;
 - a commit message draft in the human's style.
+
+Delete the reviewer's Codex sessions, which hold the task's code:
+`while read -r t; do find "${CODEX_HOME:-$HOME/.codex}/sessions" -name "*$t.jsonl" -delete; done < $RUN/threads`.
 
 Do not commit. Ask once with `AskUserQuestion`: "Veto an auto-fix?" (multi-select: `Keep
 all` and the auto-fixes, at most four) and "Did the reviewer miss anything?" (`No`, or the

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Usage: review <run-dir> <round>
-# One review round in a fresh Codex thread. Reads <run>/settings.json, <run>/review-<k>.md
-# and the T* snapshots; writes <run>/review-<k>.json. Prints a live feed of what the reviewer
-# says and runs; the raw events go to <run>/review-<k>.jsonl and Codex's stderr to
-# <run>/review-<k>.log.
+# One review round. Round 1 starts a Codex thread; the next two rounds resume it with the
+# new diff, so the reviewer keeps what it has read. Round 4 starts a new thread that reads
+# the whole change cold, and so on every THREAD_ROUNDS rounds; <run>/threads lists them all.
+# Reads <run>/settings.json, <run>/review-<k>.md and the T* snapshots; writes
+# <run>/review-<k>.json. Prints a live feed of what the reviewer says and runs, and keeps it
+# in <run>/review-<k>.feed for the dev-loop pane; the raw events go to <run>/review-<k>.jsonl
+# and Codex's stderr to <run>/review-<k>.log.
 set -euo pipefail
 
-run=$1
+run=$(cd "$1" && pwd)
 k=$2
 skill=$(cd "$(dirname "$0")/.." && pwd)
 
@@ -16,35 +19,75 @@ reviewer = json.load(open(sys.argv[1]))["reviewer"]
 print(reviewer["model"], reviewer["effort"])
 ' "$run/settings.json")
 
-base=$(cat "$run/T0")
 now=$(cat "$run/T$k")
 
+# Old findings anchor a long thread, so it gets no more than this many rounds.
+THREAD_ROUNDS=3
+is_new_thread=$(( (k - 1) % THREAD_ROUNDS == 0 ))
+
+diff_block() {
+  printf '\n<%s>\n' "$1"
+  git diff "$2" "$now"
+  printf '</%s>\n' "$1"
+}
+
 {
-  cat "$run/review-$k.md"
-  printf '\n<full_diff>\n'
-  git diff "$base" "$now"
-  printf '</full_diff>\n'
+  if [ "$is_new_thread" -eq 1 ]; then
+    cat "$run/review-1.md"
+    diff_block full_diff "$(cat "$run/T0")"
+  fi
 
   if [ "$k" -gt 1 ]; then
-    prev=$(cat "$run/T$((k - 1))")
-    printf '\n<delta_diff>\n'
-    git diff "$prev" "$now"
-    printf '</delta_diff>\n'
+    printf '\n'
+    cat "$run/review-$k.md"
+    diff_block delta_diff "$(cat "$run/T$((k - 1))")"
   fi
 } > "$run/review-$k.prompt"
 
-echo "round $k: $model/$effort reads the change"
+if [ "$is_new_thread" -eq 1 ]; then
+  target=(-s read-only -C "$(git rev-parse --show-toplevel)")
+else
+  # resume has no -s flag; the config key keeps the sandbox read-only.
+  target=(resume -c sandbox_mode=read-only "$(tail -n 1 "$run/threads")")
+fi
 
-codex exec \
-  --ephemeral \
+# The pane of the Claude Code session that runs this review reads this file.
+live=""
+if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  live="$HOME/.claude/dev-loop/live/$CLAUDE_CODE_SESSION_ID.json"
+  mkdir -p "$(dirname "$live")"
+fi
+started=$(date +%s)
+
+mark() {
+  [ -n "$live" ] || return 0
+
+  local ended=null
+  [ "$1" = running ] || ended=$(date +%s)
+  printf '{"run":"%s","round":%s,"status":"%s","started":%s,"ended":%s}\n' \
+    "$run" "$k" "$1" "$started" "$ended" > "$live"
+}
+
+mark running
+trap 'if [ $? -eq 0 ]; then mark done; else mark failed; fi' EXIT
+
+echo "round $k: $model/$effort reads the change" | tee "$run/review-$k.feed"
+
+codex exec "${target[@]}" \
   --json \
   -m "$model" \
   -c "model_reasoning_effort=$effort" \
   -c model_reasoning_summary=concise \
-  -s read-only \
-  -C "$(git rev-parse --show-toplevel)" \
   --output-schema "$skill/review.schema.json" \
   -o "$run/review-$k.json" \
   - < "$run/review-$k.prompt" 2> "$run/review-$k.log" \
   | tee "$run/review-$k.jsonl" \
-  | "$skill/bin/feed"
+  | "$skill/bin/feed" \
+  | tee -a "$run/review-$k.feed"
+
+if [ "$is_new_thread" -eq 1 ]; then
+  python3 -c '
+import json, sys
+print(json.loads(open(sys.argv[1]).readline())["thread_id"])
+' "$run/review-$k.jsonl" >> "$run/threads"
+fi

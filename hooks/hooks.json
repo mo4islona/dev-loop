@@ -1,0 +1,4 @@
+{
+  "description": "The dev-loop review pane",
+  "modules": ["./pane.tsx"]
+}

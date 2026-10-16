@@ -2,13 +2,13 @@
 """Two real review rounds on a seeded change, to watch the reviewer work without a full loop.
 
 Round 1 reviews change/avg.js: a wrong divisor and a strategy class hierarchy nobody needs.
-Round 2 reviews fix/avg.js, which fixes the divisor but counts zeros, with the hierarchy
-finding marked as rejected by the human.
+Round 2 resumes the same Codex thread with fix/avg.js, which fixes the divisor but counts
+zeros, and with the hierarchy finding marked as rejected by the human.
 
 Needs the Codex CLI. Takes a minute or two. Routes are the ones the starting profile gives.
 """
 import json
-import re
+import os
 import shutil
 import subprocess
 import sys
@@ -31,22 +31,27 @@ def snapshot(repo, run, k):
 
 
 def reviewer_prompt(k, applied="", rejected=""):
-    template = (SKILL / "prompts/reviewer.md").read_text()
-    block = re.search(r"\{\{ROUND_CONTEXT\}\}\n<!--(.*?)-->", template, flags=re.S)
-    round_one, later = block.group(1).split("Round 2 and later:\n", 1)
-
     if k == 1:
-        context = round_one.replace("Round 1:\n", "")
-    else:
-        context = later.replace("{{APPLIED}}", applied).replace("{{REJECTED}}", rejected)
+        prompt = (SKILL / "prompts/reviewer.md").read_text()
+        return (
+            prompt.replace("{{BRIEF}}", (DEMO / "brief.md").read_text())
+            .replace("{{DO_NOT_FLAG}}", "- (none)")
+            .replace("{{LOOK_FOR}}", "- (none)")
+        )
 
-    prompt = template[: block.start()] + context.strip() + template[block.end() :]
-    return (
-        prompt.replace("{{ROUND}}", str(k))
-        .replace("{{BRIEF}}", (DEMO / "brief.md").read_text())
-        .replace("{{DO_NOT_FLAG}}", "- (none)")
-        .replace("{{LOOK_FOR}}", "- (none)")
-    )
+    prompt = (SKILL / "prompts/reviewer-next.md").read_text()
+    return prompt.replace("{{ROUND}}", str(k)).replace("{{APPLIED}}", applied).replace("{{REJECTED}}", rejected)
+
+
+def forget_threads(run):
+    threads = run / "threads"
+    if not threads.exists():
+        return
+
+    sessions = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "sessions"
+    for thread in threads.read_text().split():
+        for session in sessions.rglob(f"*{thread}.jsonl"):
+            session.unlink()
 
 
 def route(f):
@@ -106,6 +111,7 @@ def main():
     try:
         demo(work)
     finally:
+        forget_threads(work / "run")
         shutil.rmtree(work)
 
 

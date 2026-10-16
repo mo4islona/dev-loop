@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.1.0",
+  "description": "A write-review-fix loop that learns when to ask, with a pane that shows the reviewer at work",
+  "author": { "name": "mo4islona" }
+}

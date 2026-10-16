@@ -23,10 +23,14 @@ drops after one veto.
 
 ## Quick start
 
-You need Claude Code, the Codex CLI (logged in), git and python3.
+You need Claude Code 2.1.287 or later, the Codex CLI (logged in), git and python3.
 
     git clone https://github.com/mo4islona/dev-loop ~/Projects/dev-loop
     ln -s ~/Projects/dev-loop ~/.claude/skills/dev-loop
+
+The link makes the folder two things at once: a skill, `/dev-loop`, and a plugin with a
+small [mod](https://code.claude.com/docs/en/plugins/mods/overview) that draws the review
+pane. Both load in your next session, or now with `/reload-plugins`.
 
 Then, in any repo:
 
@@ -156,7 +160,7 @@ flowchart TD
     brief[Brief] --> write[Writer: write the code]
     write --> tests{Tests green?}
     tests -- no --> write
-    tests -- yes --> review[Reviewer: round k, fresh Codex thread]
+    tests -- yes --> review[Reviewer: round k]
     review --> triage[Orchestrator: score and route each finding]
     triage -- nothing left --> close[Close: summary, vetoes, misses]
     triage -- only auto items --> fix[Writer: apply fixes, run tests]
@@ -175,7 +179,7 @@ Four parties take part:
 |---|---|---|
 | Orchestrator | the Claude Code session where you typed `/dev-loop` | the task |
 | Writer | a Claude subagent, Opus at high effort by default | one per task |
-| Reviewer | Codex, `gpt-6-astra` at high reasoning by default, read-only | a new thread every round |
+| Reviewer | Codex, `gpt-6-astra` at high reasoning by default, read-only | one thread for up to three rounds |
 | You | the gate | only the findings routed to you |
 
 The orchestrator writes no code. It frames the task, runs the other two, scores findings,
@@ -184,9 +188,12 @@ and keeps the record.
 The writer lives for the whole task. Fix requests go back to the same agent, so it still
 knows why it wrote what it wrote and can argue back.
 
-The reviewer is the opposite: a new thread every round. A reviewer that remembers its last
-round mostly checks its own old findings. A new one reads the change cold and finds what
-the last one missed.
+The reviewer keeps a thread too, but a shorter one. Round 1 reads the code; the next two
+rounds get only the new diff, so the reviewer doesn't pay to read everything again. The
+risk is that a reviewer with a memory only checks its old findings. So each round's message
+gives it three jobs, and the last one is to hunt the whole change for bugs as if nobody had
+reviewed it. And in round 4 a new thread starts, reads the whole change cold, and runs for
+three rounds in its turn.
 
 The writer and the reviewer are different models on purpose. A model reviewing code from
 its own family tends to share that family's blind spots.
@@ -208,8 +215,8 @@ category, severity, confidence, the concrete failure, the fix, and some facts ab
 which sensitive areas it touches).
 
 A review takes a few minutes, and a silent wait that long looks like a hang. So you watch
-it work: what the reviewer says and every command it runs come into the chat as they
-happen.
+it work in a pane above the prompt: what the reviewer says and every command it runs, as
+they happen. The chat stays quiet until the review ends.
 
     round 1: gpt-6-astra/high reads the change
       codex  I’ll read the implementation and test setup, then check the results for mixed, empty, and non-
@@ -218,6 +225,10 @@ happen.
       $ cat avg.js sum.js; node -e 'const {averagePositive}=require("./avg"); for (const xs of [[1,-1,3],[],[-1,0],[1…
       think  Summarizing bug analysis · Detailing bug fix and complexity changes
     done in 47 s: verdict rethink, 2 findings
+
+The line under the prompt shows the round's clock and its latest action, and a click on it
+opens or closes the pane; Esc closes it too. The pane opens by itself only in a terminal 144
+columns wide or more, or 110 once you've opened it yourself.
 
 **4. Triage.** The orchestrator reads the cited code and agrees or disagrees with each
 finding. It drops nits and anything you've already rejected in this task. Then it routes the
@@ -394,11 +405,12 @@ gets "learned" away.
 | `SKILL.md` | the procedure the orchestrator follows | you; Retro may propose edits |
 | `settings.json` | default models and effort | you |
 | `profile.md` | knobs, autonomy table, learned rules | Retro and vetoes |
-| `prompts/writer.md`, `fix.md`, `reviewer.md` | what each model is told | you |
+| `prompts/writer.md`, `fix.md`, `reviewer.md`, `reviewer-next.md` | what each model is told | you |
 | `review.schema.json` | the shape of the reviewer's answer | you |
 | `bin/snapshot` | a hash of the working tree | none |
 | `bin/review` | runs one Codex review round and prints its live feed | none |
 | `bin/feed` | turns Codex's event stream into that feed | none |
+| `hooks/pane.tsx`, `tests/` | the mod that draws the feed in a pane, and its tests (`claude plugin test`) | none |
 | `bin/stats` | ledger numbers and rule candidates | none |
 | `demo/` | two review rounds on a seeded change | you |
 
@@ -406,8 +418,8 @@ gets "learned" away.
 
 - It never commits, pushes or makes a worktree in your repo.
 - The reviewer runs in a read-only sandbox.
-- It cleans up after itself. Codex keeps no session files from the reviews, and a run's
-  directory (prompts, diffs, raw reviews) is deleted after 14 days, about when git's own
+- It cleans up after itself. The reviewer's Codex session holds your code, so it's deleted
+  when the task closes. A run's directory (prompts, diffs, raw reviews) is deleted after 14 days, about when git's own
   cleanup may drop the snapshot trees. The ledger stays: it's what the loop learns from.
 - It never touches your git index, HEAD or branch. Snapshots are tree objects built from a
   throwaway index, and any auto-fix can be undone with `git diff <before> <after> | git apply -R`.

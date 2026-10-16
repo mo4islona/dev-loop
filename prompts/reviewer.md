@@ -1,32 +1,16 @@
-# Code review, round {{ROUND}}
+# Code review
 
 Another model wrote a change for the task below. Review it. You have read-only access to
-the repository: read any file and run read-only commands, but edit nothing. The diffs are
-at the end of this prompt.
+the repository: read any file and run read-only commands, but edit nothing. The diff is at
+the end of this prompt.
 
 ## Task
 {{BRIEF}}
 
 ## This round
-{{ROUND_CONTEXT}}
-<!-- Round 1:
-Review the whole change in <full_diff>. Report every finding with origin `new`.
-
-Round 2 and later:
-Since the last review, the writer applied these fixes:
-{{APPLIED}}
-
-Do all three, in this order:
-1. Check each applied fix. Is it correct and complete? For an incomplete fix, report a
-   finding with origin `incomplete_fix` and `prior_id` set to the fix's id.
-2. Hunt for bugs that the fixes brought in. <delta_diff> holds the fixes alone; read the
-   code around them as well. Origin `fix_regression`.
-3. Hunt for new bugs across the whole change in <full_diff>, as if no one had reviewed it.
-   Earlier rounds miss things. Origin `missed`.
-
-The human rejected these findings. Do not report them again:
-{{REJECTED}}
--->
+Review the whole change in <full_diff>. Report every finding with origin `new`, numbered
+R1-1, R1-2 and so on, unless a round message after the diff says otherwise. After the
+writer fixes what the human accepts, later rounds come as new messages.
 
 ## What counts, in order
 1. Bugs: the change does not do what the task asks, or it breaks something that worked.
